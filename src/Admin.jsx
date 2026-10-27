@@ -47,9 +47,16 @@ export function AdminElection() {
   const [e, setE] = useState(null);
   const [cands, setCands] = useState([]);
   const [voters, setVoters] = useState([]);
+  const [tally, setTally] = useState({ counts: {}, total: 0 });
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('');
-  const load = () => { api(`/admin/elections/${id}`).then(setE); api(`/admin/elections/${id}/candidates`).then(setCands); api(`/admin/elections/${id}/voters`).then(setVoters); };
+  const load = () => { api(`/admin/elections/${id}`).then(setE); api(`/admin/elections/${id}/candidates`).then(setCands); api(`/admin/elections/${id}/voters`).then(setVoters); api(`/admin/elections/${id}/tally`).then(setTally); };
   useEffect(() => { load(); }, [id]);
+  // live refresh of the counts while voting is open
+  useEffect(() => {
+    if (e?.status !== 'voting') return;
+    const t = setInterval(() => api(`/admin/elections/${id}/tally`).then(setTally).catch(() => {}), 10000);
+    return () => clearInterval(t);
+  }, [e?.status, id]);
   if (!e) return <Err msg={err} />;
   const link = `${location.origin}/apply/${e.applyCode}`;
   const run = (fn) => async () => { setErr(''); setMsg(''); try { await fn(); load(); } catch (x) { setErr(x.message); } };
@@ -76,6 +83,7 @@ export function AdminElection() {
 
       <div className="space-y-3">
         <h2 className="text-xl font-extrabold text-white">Candidate applications ({cands.length})</h2>
+        {e.status === 'voting' && <p className="text-sm text-soft">Live counts refresh every 10 seconds. Only admins see them. The public sees results after voting closes.</p>}
         {!cands.length && <div className="panel text-soft">None yet. Open the link and share it.</div>}
         {cands.map((c) => (
           <div key={c.id} className="panel space-y-3">
@@ -87,9 +95,13 @@ export function AdminElection() {
                 <p className="text-xs text-soft">{c.user?.department}. ID {c.user?.employeeId}. {c.user?.email}. {c.user?.phone}</p>
                 <p className="mt-2 whitespace-pre-wrap text-sm">{c.manifesto}</p>
                 {c.note && <p className="mt-1 text-xs text-bad">Reason: {c.note}</p>}
+                {!c.photoUrl && <p className="mt-1 text-xs font-bold text-gold">No photo. A photo is required before approval.</p>}
+                {locked && c.status === 'approved' && (() => { const n = tally.counts[c.id] || 0; return (
+                  <div className="mt-3"><div className="flex justify-between text-sm font-bold"><span className="text-white">{n} {n === 1 ? 'vote' : 'votes'}{e.status === 'voting' ? ' so far' : ''}</span><span>{tally.total ? Math.round((n / tally.total) * 100) : 0}%</span></div>
+                    <div className="mt-1 h-2 rounded bg-raise"><div className="h-2 rounded bg-gold" style={{ width: `${tally.total ? (n / tally.total) * 100 : 0}%` }} /></div></div>); })()}
               </div>
             </div>
-            {!locked && <div className="flex gap-2"><button className="btn" disabled={c.status === 'approved'} onClick={decide(c, 'approved')}>Approve</button><button className="btn-alt" disabled={c.status === 'rejected'} onClick={decide(c, 'rejected')}>Reject</button></div>}
+            {!locked && <div className="flex gap-2"><button className="btn" disabled={c.status === 'approved' || !c.photoUrl} onClick={decide(c, 'approved')}>Approve</button><button className="btn-alt" disabled={c.status === 'rejected'} onClick={decide(c, 'rejected')}>Reject</button></div>}
           </div>
         ))}
         <p className="text-xs text-soft">Approved candidates appear on the ballot. Decisions lock when voting starts, and each one is written to the public audit log.</p>

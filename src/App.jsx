@@ -117,7 +117,7 @@ function Profile() {
   return (
     <form onSubmit={save} className="panel mx-auto max-w-xl space-y-4">
       <div><h1 className="text-2xl font-extrabold text-white">Your voter profile</h1><p className="text-sm text-soft">Fill this in once. It is used for every election, so registering later takes one click.</p></div>
-      <PhotoUpload value={f.photoUrl} name={f.name} onChange={(photoUrl) => setF({ ...f, photoUrl })} label="Profile photo" />
+      <PhotoUpload value={f.photoUrl} name={f.name} onChange={(photoUrl) => setF({ ...f, photoUrl })} label="Profile photo (optional for voters)" />
       <div className="grid gap-4 sm:grid-cols-2">
         {field('name', 'Full name')}
         <div><label className="label">Work email</label><input className="input opacity-60" value={user.email} disabled /></div>
@@ -126,8 +126,7 @@ function Profile() {
       </div>
       {field('department', 'Department')}
       <Err msg={err} /><Ok msg={msg} />
-      <button className="btn" disabled={f.photoUrl}>Save profile</button>
-      {!f.photoUrl && <p className="text-xs text-soft">Upload a photo to save.</p>}
+      <button className="btn">Save profile</button>
     </form>
   );
 }
@@ -175,14 +174,17 @@ function Election() {
             <h2 className="text-xl font-extrabold text-white">Choose one candidate</h2>
             <div className="grid gap-3 sm:grid-cols-2">
               {candidates.map((c) => (
-                <label key={c.id} className="panel flex cursor-pointer gap-4 transition has-[:checked]:border-gold has-[:checked]:bg-gold/10">
+                <label key={c.id} className={`panel relative flex cursor-pointer gap-4 transition has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-gold ${pick === c.id ? 'border-gold bg-gold/10' : 'hover:border-brand'}`}>
                   <input type="radio" name="c" className="sr-only" checked={pick === c.id} onChange={() => setPick(c.id)} />
+                  <span aria-hidden className={`absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full border-2 ${pick === c.id ? 'border-gold bg-gold text-night' : 'border-line'}`}>
+                    {pick === c.id && <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="3"><path d="M4 10.5l4 4 8-9" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                  </span>
                   <Avatar src={c.photoUrl} name={c.name} size={72} />
-                  <span className="min-w-0"><b className="block text-white">{c.name}</b><span className="text-xs text-soft">{c.department}</span><span className="mt-2 line-clamp-4 block text-sm">{c.manifesto}</span></span>
+                  <span className="min-w-0 pr-8"><b className="block text-white">{c.name}</b><span className="text-xs text-soft">{c.department}</span><span className="mt-2 line-clamp-4 block text-sm">{c.manifesto}</span></span>
                 </label>
               ))}
             </div>
-            <button className="btn" disabled={!pick} onClick={() => confirm('Cast this vote? You cannot change it.') && act('vote', { candidateId: pick })()}>Cast my vote</button>
+            <button className="btn" disabled={!pick} onClick={() => confirm('Cast this vote? You cannot change it.') && act('vote', { candidateId: pick })()}>{pick ? `Cast my vote for ${candidates.find((c) => c.id === pick)?.name}` : 'Select a candidate'}</button>
           </div>
         )
       )}
@@ -314,13 +316,13 @@ function Apply() {
       {!d.open ? <div className="panel text-soft">Applications for this election are closed.</div>
         : !user ? <div className="panel space-y-3"><p>Log in with your work email to apply.</p><Link className="btn" to={`/login?next=/apply/${code}`}>Log in</Link></div>
         : d.mine ? <div className="panel"><p className="font-extrabold text-white">Application {d.mine.status}</p><p className="text-sm text-soft">{d.mine.status === 'pending' ? 'An admin is reviewing it. Check back here.' : d.mine.status === 'approved' ? 'You are on the ballot.' : `Not approved. ${d.mine.note}`}</p></div>
-        : !d.profileComplete ? <div className="panel space-y-3"><p>Complete your profile first. It is shown to voters next to your name.</p><Link className="btn" to="/profile">Complete profile</Link></div>
+        : !d.profileComplete ? <div className="panel space-y-3"><p>Complete your profile first. Your details are shown to voters next to your name.</p><Link className="btn" to="/profile">Complete profile</Link></div>
         : (
           <form onSubmit={submit} className="panel space-y-4">
             <div className="flex items-center gap-3"><Avatar src={user.photoUrl} name={user.name} size={48} /><div><b className="text-white">{user.name}</b><p className="text-xs text-soft">{user.department}, ID {user.employeeId}</p></div></div>
             <div><label className="label" htmlFor="m">Why should colleagues vote for you?</label><textarea id="m" className="input" rows={6} required minLength={20} maxLength={1500} value={f.manifesto} onChange={(e) => setF({ ...f, manifesto: e.target.value })} /></div>
-            <PhotoUpload value={f.photoUrl} name={user.name} label="Campaign photo (optional, defaults to your profile photo)" onChange={(photoUrl) => setF({ ...f, photoUrl })} />
-            <Err msg={err} /><button className="btn">Submit application</button>
+            <PhotoUpload value={f.photoUrl} name={user.name} label={user.photoUrl ? "Campaign photo (optional, defaults to your profile photo)" : "Candidate photo (required to appear on the ballot)"} onChange={(photoUrl) => setF({ ...f, photoUrl })} />
+            <Err msg={err} /><button className="btn" disabled={!user.photoUrl && !f.photoUrl}>Submit application</button>
           </form>
         )}
       {d.open && user && !d.mine && err && null}
