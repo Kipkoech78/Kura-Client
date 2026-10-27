@@ -1,5 +1,5 @@
 import React, { useEffect, useState, createContext, useContext } from 'react';
-import { Routes, Route, NavLink, Link, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Routes, Route, NavLink, Link, Navigate, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { api, fmt, sha256, getReceipts, saveReceipt } from './api.js';
 import { Err, Ok, Badge, Avatar, PhotoUpload, Phases, Spinner, Loading, Btn, useBusy } from './ui.jsx';
 import Admin, { AdminElection } from './Admin.jsx';
@@ -24,7 +24,7 @@ export default function App() {
           <Link to="/" className="mr-auto text-lg font-extrabold text-white">Company Vote</Link>
           <NavLink to="/" end className={nav}>Elections</NavLink>
           {user && <NavLink to="/my-votes" className={nav}>My votes</NavLink>}
-          <NavLink to="/audit" className={nav}>Audit log</NavLink>
+          {/* <NavLink to="/audit" className={nav}>Audit log</NavLink> */}
           {user?.role === 'admin' && <NavLink to="/admin" className={nav}>Admin</NavLink>}
           {user ? (<>
             <NavLink to="/profile" className="ml-2 flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-raise"><Avatar src={user.photoUrl} name={user.name} size={28} />{user.name.split(' ')[0]}</NavLink>
@@ -79,16 +79,37 @@ function Login() {
   const [busy, run] = useBusy();
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const send = (e) => { e.preventDefault(); setErr(''); return run(async () => { try { await api('/auth/request-code', { method: 'POST', body: f }); setSent(true); } catch (x) { setErr(x.message); } }); };
-  const verify = (e) => {
-    e.preventDefault(); setErr('');
-    return run(async () => {
+  
+const verify = (e) => {
+  e.preventDefault();
+  setErr('');
+
+  return run(async () => {
     try {
-      const d = await api('/auth/verify', { method: 'POST', body: f });
-      localStorage.setItem('token', d.token); setUser(d.user);
-      go(new URLSearchParams(location.search).get('next') || (d.user.profileComplete ? '/' : '/profile'));
-    } catch (x) { setErr(x.message); }
-    });
-  };
+      const d = await api('/auth/verify', {
+        method: 'POST',
+        body: f
+      });
+
+      localStorage.setItem('token', d.token);
+      setUser(d.user);
+
+      const params = new URLSearchParams(location.search);
+      const next = params.get('next') || '/';
+
+      if (!d.user.profileComplete) {
+        go(`/profile?next=${encodeURIComponent(next)}`, {
+          replace: true
+        });
+      } else {
+        go(next, { replace: true });
+      }
+    } catch (x) {
+      setErr(x.message);
+    }
+  });
+};
+
   return (
     <form onSubmit={sent ? verify : send} className="panel mx-auto mt-8 max-w-md space-y-4">
       <h1 className="text-2xl font-extrabold text-white">{sent ? 'Check your email' : 'Sign in or create your account'}</h1>
@@ -111,6 +132,10 @@ function Login() {
 function Profile() {
   const { user, setUser } = useAuth();
   const navigate = useNavigate();
+const location = useLocation();
+
+const params = new URLSearchParams(location.search);
+const next = params.get('next') || '/';
 
   const [f, setF] = useState({
     name: user.name,
@@ -128,24 +153,29 @@ function Profile() {
   const set = (k) => (e) =>
     setF({ ...f, [k]: e.target.value });
 
-  const save = (e) => {
-    e.preventDefault();
-    setErr('');
-    setMsg('');
+  
+const save = (e) => {
+  e.preventDefault();
+  setErr('');
+  setMsg('');
 
-    return run(async () => {
-      try {
-        setUser(await api('/me/profile', {
-          method: 'PUT',
-          body: f
-        }));
+  return run(async () => {
+    try {
+      const updatedUser = await api('/me/profile', {
+        method: 'PUT',
+        body: f
+      });
 
-        navigate('/'); // Redirect home after successful save
-      } catch (x) {
-        setErr(x.message);
-      }
-    });
-  };
+      setUser(updatedUser);
+
+      // Return to the original destination after saving the profile.
+      navigate(next, { replace: true });
+    } catch (x) {
+      setErr(x.message);
+    }
+  });
+};
+
 
   const field = (k, label, props = {}) => (
     <div>
@@ -508,12 +538,27 @@ function Ledger({ pid, candidates }) {
 function Apply() {
   const { code } = useParams();
   const { user } = useAuth();
+  const navigate = useNavigate();
+
+  const applicationPath = `/apply/${code}`;
   const [d, setD] = useState(null);
   const [f, setF] = useState({ positionId: '', manifesto: '', photoUrl: '' });
   const [err, setErr] = useState('');
   const [busy, run] = useBusy();
   const load = () => api(`/apply/${code}`).then(setD).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, [code, user]);
+  useEffect(() => {
+  if (!user || !d) return;
+
+  // A logged-in user with an incomplete profile must complete it first.
+  if (!d.profileComplete) {
+    navigate(
+      `/profile?next=${encodeURIComponent(applicationPath)}`,
+      { replace: true }
+    );
+  }
+}, [user, d, applicationPath, navigate]);
+  
   const submit = (e) => { e.preventDefault(); setErr(''); return run(async () => { try { await api(`/apply/${code}`, { method: 'POST', body: f }); setF({ positionId: '', manifesto: '', photoUrl: '' }); await load(); } catch (x) { setErr(x.message); } }); };
   if (!d) return err ? <Err msg={err} /> : <Loading text="Loading application..." />;
   const available = d.standing ? [] : d.positions.filter((p) => p.open && p.canApply && !p.mine);
