@@ -60,3 +60,18 @@ export function Phases({ e, status }) {
     </ol>
   );
 }
+
+export const Spinner = ({ className = 'h-4 w-4' }) => (
+  <svg className={`animate-spin ${className}`} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity=".25" />
+    <path d="M21 12a9 9 0 00-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+  </svg>
+);
+export const Loading = ({ text = 'Loading...' }) => <div role="status" className="flex items-center justify-center gap-3 py-16 text-soft"><Spinner className="h-5 w-5" />{text}</div>;
+// Button that shows a spinner and blocks double clicks while its action runs
+export const Btn = ({ busy, children, className = 'btn', disabled, ...p }) => <button className={className} disabled={busy || disabled} aria-busy={!!busy} {...p}>{busy && <Spinner />}{children}</button>;
+export function useBusy() {
+  const [busy, setBusy] = useState(false);
+  const run = async (fn) => { setBusy(true); try { return await fn(); } finally { setBusy(false); } };
+  return [busy, run];
+}

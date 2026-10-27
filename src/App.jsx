@@ -1,7 +1,7 @@
 import React, { useEffect, useState, createContext, useContext } from 'react';
 import { Routes, Route, NavLink, Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { api, fmt, sha256, getReceipts, saveReceipt } from './api.js';
-import { Err, Ok, Badge, Avatar, PhotoUpload, Phases } from './ui.jsx';
+import { Err, Ok, Badge, Avatar, PhotoUpload, Phases, Spinner, Loading, Btn, useBusy } from './ui.jsx';
 import Admin, { AdminElection } from './Admin.jsx';
 
 const Auth = createContext();
@@ -16,7 +16,7 @@ export default function App() {
     api('/me').then(setUser).catch(() => localStorage.removeItem('token')).finally(() => setReady(true));
   }, []);
   const logout = () => { localStorage.removeItem('token'); setUser(null); };
-  if (!ready) return null;
+  if (!ready) return <Loading text="Starting up..." />;
   return (
     <Auth.Provider value={{ user, setUser }}>
       <header className="sticky top-0 z-10 border-b border-line bg-night/90 backdrop-blur">
@@ -55,6 +55,7 @@ function Home() {
   return (
     <>
       <div><h1 className="text-3xl font-extrabold text-white">Elections</h1><p className="text-soft">Register, vote, and verify your ballot. Results appear only after voting closes.</p></div>
+      {!list && <Loading text="Loading elections..." />}
       {list && !list.length && <div className="panel text-soft">No elections yet. An admin will schedule one soon.</div>}
       <div className="grid gap-4 sm:grid-cols-2">
         {list?.map((e) => (
@@ -75,15 +76,18 @@ function Login() {
   const [f, setF] = useState({ email: '', name: '', code: '' });
   const [sent, setSent] = useState(false);
   const [err, setErr] = useState('');
+  const [busy, run] = useBusy();
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-  const send = async (e) => { e.preventDefault(); setErr(''); try { await api('/auth/request-code', { method: 'POST', body: f }); setSent(true); } catch (x) { setErr(x.message); } };
-  const verify = async (e) => {
+  const send = (e) => { e.preventDefault(); setErr(''); return run(async () => { try { await api('/auth/request-code', { method: 'POST', body: f }); setSent(true); } catch (x) { setErr(x.message); } }); };
+  const verify = (e) => {
     e.preventDefault(); setErr('');
+    return run(async () => {
     try {
       const d = await api('/auth/verify', { method: 'POST', body: f });
       localStorage.setItem('token', d.token); setUser(d.user);
       go(new URLSearchParams(location.search).get('next') || (d.user.profileComplete ? '/' : '/profile'));
     } catch (x) { setErr(x.message); }
+    });
   };
   return (
     <form onSubmit={sent ? verify : send} className="panel mx-auto mt-8 max-w-md space-y-4">
@@ -92,12 +96,12 @@ function Login() {
         <p className="text-sm text-soft">Use your work email. We send a 6-digit code, so there is no password to remember.</p>
         <div><label className="label" htmlFor="em">Work email</label><input id="em" className="input" type="email" required value={f.email} onChange={set('email')} /></div>
         <div><label className="label" htmlFor="nm">Full name <span className="font-normal">(first time only)</span></label><input id="nm" className="input" value={f.name} onChange={set('name')} /></div>
-        <button className="btn w-full">Email me a code</button>
+        <Btn className="btn w-full" busy={busy}>{busy ? 'Sending code...' : 'Email me a code'}</Btn>
       </>) : (<>
         <p className="text-sm text-soft">We sent a code to {f.email}. It expires in 10 minutes.</p>
         <input className="input text-center text-2xl tracking-[0.5em]" inputMode="numeric" maxLength={6} placeholder="000000" required value={f.code} onChange={set('code')} autoFocus aria-label="6-digit code" />
-        <button className="btn w-full">Verify and continue</button>
-        <button type="button" className="btn-alt w-full" onClick={() => setSent(false)}>Use a different email</button>
+        <Btn className="btn w-full" busy={busy}>{busy ? 'Verifying...' : 'Verify and continue'}</Btn>
+        <button type="button" className="btn-alt w-full" disabled={busy} onClick={() => setSent(false)}>Use a different email</button>
       </>)}
       <Err msg={err} />
     </form>
@@ -108,10 +112,11 @@ function Profile() {
   const { user, setUser } = useAuth();
   const [f, setF] = useState({ name: user.name, phone: user.phone, employeeId: user.employeeId, department: user.department, photoUrl: user.photoUrl });
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('');
+  const [busy, run] = useBusy();
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-  const save = async (e) => {
+  const save = (e) => {
     e.preventDefault(); setErr(''); setMsg('');
-    try { setUser(await api('/me/profile', { method: 'PUT', body: f })); setMsg('Profile saved. You can now register to vote or apply as a candidate.'); } catch (x) { setErr(x.message); }
+    return run(async () => { try { setUser(await api('/me/profile', { method: 'PUT', body: f })); setMsg('Profile saved. You can now register to vote or apply as a candidate.'); } catch (x) { setErr(x.message); } });
   };
   const field = (k, label, props = {}) => <div><label className="label" htmlFor={k}>{label}</label><input id={k} className="input" required value={f[k]} onChange={set(k)} {...props} /></div>;
   return (
@@ -126,7 +131,7 @@ function Profile() {
       </div>
       {field('department', 'Department')}
       <Err msg={err} /><Ok msg={msg} />
-      <button className="btn">Save profile</button>
+      <Btn busy={busy}>{busy ? 'Saving...' : 'Save profile'}</Btn>
     </form>
   );
 }
@@ -139,13 +144,14 @@ function Election() {
   const [receipt, setReceipt] = useState('');
   const [res, setRes] = useState(null);
   const [err, setErr] = useState('');
+  const [acting, setActing] = useState('');
   const load = () => api(`/elections/${id}`).then((x) => { setD(x); if (x.status === 'closed') api(`/elections/${id}/results`).then(setRes); }).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, [id, user]);
   const act = (path, body) => async () => {
-    setErr('');
-    try { const r = await api(`/elections/${id}/${path}`, { method: 'POST', body }); if (r.receipt) { setReceipt(r.receipt); saveReceipt(id, r.receipt); } load(); } catch (e) { setErr(e.message); }
+    setErr(''); setActing(path);
+    try { const r = await api(`/elections/${id}/${path}`, { method: 'POST', body }); if (r.receipt) { setReceipt(r.receipt); saveReceipt(id, r.receipt); } await load(); } catch (e) { setErr(e.message); } finally { setActing(''); }
   };
-  if (!d) return <Err msg={err} />;
+  if (!d) return err ? <Err msg={err} /> : <Loading text="Loading election..." />;
   const { election: e, status, me, candidates } = d;
   return (
     <>
@@ -161,7 +167,7 @@ function Election() {
           {!user ? <Link className="btn" to={`/login?next=/election/${id}`}>Log in to register</Link>
             : me?.registered ? <span className="font-extrabold text-good">You are registered</span>
             : !me?.profileComplete ? <Link className="btn" to="/profile">Complete profile first</Link>
-            : <button className="btn" onClick={act('register')}>Register to vote</button>}
+            : <Btn busy={acting === 'register'} onClick={act('register')}>{acting === 'register' ? 'Registering...' : 'Register to vote'}</Btn>}
         </div>
       )}
 
@@ -175,7 +181,7 @@ function Election() {
             <div className="grid gap-3 sm:grid-cols-2">
               {candidates.map((c) => (
                 <label key={c.id} className={`panel relative flex cursor-pointer gap-4 transition has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-gold ${pick === c.id ? 'border-gold bg-gold/10' : 'hover:border-brand'}`}>
-                  <input type="radio" name="c" className="sr-only" checked={pick === c.id} onChange={() => setPick(c.id)} />
+                  <input type="radio" name="c" className="sr-only" checked={pick === c.id} onChange={() => setPick(c.id)} disabled={acting === 'vote'} />
                   <span aria-hidden className={`absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full border-2 ${pick === c.id ? 'border-gold bg-gold text-night' : 'border-line'}`}>
                     {pick === c.id && <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="3"><path d="M4 10.5l4 4 8-9" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                   </span>
@@ -184,7 +190,7 @@ function Election() {
                 </label>
               ))}
             </div>
-            <button className="btn" disabled={!pick} onClick={() => confirm('Cast this vote? You cannot change it.') && act('vote', { candidateId: pick })()}>{pick ? `Cast my vote for ${candidates.find((c) => c.id === pick)?.name}` : 'Select a candidate'}</button>
+            <Btn busy={acting === 'vote'} disabled={!pick} onClick={() => confirm('Cast this vote? You cannot change it.') && act('vote', { candidateId: pick })()}>{acting === 'vote' ? 'Recording your vote...' : pick ? `Cast my vote for ${candidates.find((c) => c.id === pick)?.name}` : 'Select a candidate'}</Btn>
           </div>
         )
       )}
@@ -227,6 +233,7 @@ export function Tracker({ id, registered, voted, status }) {
   return (
     <ol className="panel space-y-3">
       <h2 className="font-extrabold text-white">Track your vote</h2>
+      {!ledger && <p className="flex items-center gap-2 text-xs text-soft"><Spinner /> Checking the public ledger...</p>}
       {stages.map(([t, ok, note]) => (
         <li key={t} className="flex gap-3"><span aria-hidden className={`mt-1 h-3 w-3 shrink-0 rounded-full ${ok ? 'bg-good' : 'bg-line'}`} /><div><p className={`text-sm font-bold ${ok ? 'text-white' : 'text-soft'}`}>{t}</p><p className="text-xs text-soft">{note}</p></div></li>
       ))}
@@ -240,6 +247,7 @@ function MyVotes() {
   return (
     <>
       <div><h1 className="text-3xl font-extrabold text-white">My votes</h1><p className="text-soft">Follow every ballot you cast, from registration to the final count.</p></div>
+      {!list && <Loading text="Loading your elections..." />}
       {list && !list.length && <div className="panel text-soft">You have not registered for any election yet. <Link to="/" className="font-bold text-brand underline">Browse elections</Link></div>}
       {list?.map((x) => (
         <div key={x.id} className="space-y-2">
@@ -284,7 +292,7 @@ function Ledger({ id, status, candidates }) {
       setSelf(true);
     })();
   }, [ledger]);
-  if (!ledger) return null;
+  if (!ledger) return <div className="panel"><Loading text="Loading ledger..." /></div>;
   const hit = q.trim().length === 64 ? ledger.ballots.find((b) => b.hash === q.trim().toLowerCase()) : null;
   return (
     <div className="panel space-y-3">
@@ -306,10 +314,11 @@ function Apply() {
   const [d, setD] = useState(null);
   const [f, setF] = useState({ manifesto: '', photoUrl: '' });
   const [err, setErr] = useState('');
+  const [busy, run] = useBusy();
   const load = () => api(`/apply/${code}`).then(setD).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, [code, user]);
-  const submit = async (e) => { e.preventDefault(); setErr(''); try { await api(`/apply/${code}`, { method: 'POST', body: f }); load(); } catch (x) { setErr(x.message); } };
-  if (!d) return <Err msg={err} />;
+  const submit = (e) => { e.preventDefault(); setErr(''); return run(async () => { try { await api(`/apply/${code}`, { method: 'POST', body: f }); await load(); } catch (x) { setErr(x.message); } }); };
+  if (!d) return err ? <Err msg={err} /> : <Loading text="Loading application..." />;
   return (
     <div className="mx-auto max-w-xl space-y-4">
       <div><p className="text-sm font-bold text-gold">Candidate application</p><h1 className="text-3xl font-extrabold text-white">{d.title}</h1><p className="text-soft">{d.description}</p></div>
@@ -322,7 +331,7 @@ function Apply() {
             <div className="flex items-center gap-3"><Avatar src={user.photoUrl} name={user.name} size={48} /><div><b className="text-white">{user.name}</b><p className="text-xs text-soft">{user.department}, ID {user.employeeId}</p></div></div>
             <div><label className="label" htmlFor="m">Why should colleagues vote for you?</label><textarea id="m" className="input" rows={6} required minLength={20} maxLength={1500} value={f.manifesto} onChange={(e) => setF({ ...f, manifesto: e.target.value })} /></div>
             <PhotoUpload value={f.photoUrl} name={user.name} label={user.photoUrl ? "Campaign photo (optional, defaults to your profile photo)" : "Candidate photo (required to appear on the ballot)"} onChange={(photoUrl) => setF({ ...f, photoUrl })} />
-            <Err msg={err} /><button className="btn" disabled={!user.photoUrl && !f.photoUrl}>Submit application</button>
+            <Err msg={err} /><Btn busy={busy} disabled={!user.photoUrl && !f.photoUrl}>{busy ? 'Submitting...' : 'Submit application'}</Btn>
           </form>
         )}
       {d.open && user && !d.mine && err && null}
@@ -333,7 +342,7 @@ function Apply() {
 function Audit() {
   const [a, setA] = useState(null);
   useEffect(() => { api('/audit').then(setA); }, []);
-  if (!a) return null;
+  if (!a) return <Loading text="Loading audit log..." />;
   return (
     <div className="panel space-y-3">
       <div><h1 className="text-2xl font-extrabold text-white">Admin audit log</h1><p className="text-sm text-soft">Every admin action is recorded in a hash chain. Status: <b className={a.valid ? 'text-good' : 'text-bad'}>{a.valid ? 'intact' : 'TAMPERED'}</b>.</p></div>
