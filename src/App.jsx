@@ -110,33 +110,117 @@ function Login() {
 
 function Profile() {
   const { user, setUser } = useAuth();
-  const [f, setF] = useState({ name: user.name, phone: user.phone, employeeId: user.employeeId, department: user.department, gender: user.gender || '', photoUrl: user.photoUrl });
-  const [msg, setMsg] = useState(''); const [err, setErr] = useState('');
+  const navigate = useNavigate();
+
+  const [f, setF] = useState({
+    name: user.name,
+    phone: user.phone,
+    employeeId: user.employeeId,
+    department: user.department,
+    gender: user.gender || '',
+    photoUrl: user.photoUrl
+  });
+
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
   const [busy, run] = useBusy();
-  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  const set = (k) => (e) =>
+    setF({ ...f, [k]: e.target.value });
+
   const save = (e) => {
-    e.preventDefault(); setErr(''); setMsg('');
-    return run(async () => { try { setUser(await api('/me/profile', { method: 'PUT', body: f })); setMsg('Profile saved. You can now register to vote or apply as a candidate.'); } catch (x) { setErr(x.message); } });
+    e.preventDefault();
+    setErr('');
+    setMsg('');
+
+    return run(async () => {
+      try {
+        setUser(await api('/me/profile', {
+          method: 'PUT',
+          body: f
+        }));
+
+        navigate('/'); // Redirect home after successful save
+      } catch (x) {
+        setErr(x.message);
+      }
+    });
   };
-  const field = (k, label, props = {}) => <div><label className="label" htmlFor={k}>{label}</label><input id={k} className="input" required value={f[k]} onChange={set(k)} {...props} /></div>;
+
+  const field = (k, label, props = {}) => (
+    <div>
+      <label className="label" htmlFor={k}>{label}</label>
+      <input
+        id={k}
+        className="input"
+        required
+        value={f[k]}
+        onChange={set(k)}
+        {...props}
+      />
+    </div>
+  );
+
   return (
     <form onSubmit={save} className="panel mx-auto max-w-xl space-y-4">
-      <div><h1 className="text-2xl font-extrabold text-white">Your voter profile</h1><p className="text-sm text-soft">Fill this in once. It is used for every election, so registering later takes one click.</p></div>
-      <PhotoUpload value={f.photoUrl} name={f.name} onChange={(photoUrl) => setF({ ...f, photoUrl })} label="Profile photo (optional for voters)" />
+      <div>
+        <h1 className="text-2xl font-extrabold text-white">
+          Your voter profile
+        </h1>
+        <p className="text-sm text-soft">
+          Fill this in once. It is used for every election, so registering later takes one click.
+        </p>
+      </div>
+
+      <PhotoUpload
+        value={f.photoUrl}
+        name={f.name}
+        onChange={(photoUrl) => setF({ ...f, photoUrl })}
+        label="Profile photo (optional for voters)"
+      />
+
       <div className="grid gap-4 sm:grid-cols-2">
         {field('name', 'Full name')}
-        <div><label className="label">Work email</label><input className="input opacity-60" value={user.email} disabled /></div>
+
+        <div>
+          <label className="label">Work email</label>
+          <input className="input opacity-60" value={user.email} disabled />
+        </div>
+
         {field('phone', 'Phone number', { type: 'tel' })}
         {field('employeeId', 'Employee ID')}
       </div>
+
       <div className="grid gap-4 sm:grid-cols-2">
         {field('department', 'Department')}
-        <div><label className="label" htmlFor="gender">Gender</label>
-          <select id="gender" className="input" required value={f.gender} onChange={set('gender')}><option value="">Select</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other / prefer not to say</option></select>
-          <p className="mt-1 text-xs text-soft">Used only for gender-specific seats, such as hostel captains.</p></div>
+
+        <div>
+          <label className="label" htmlFor="gender">Gender</label>
+          <select
+            id="gender"
+            className="input"
+            required
+            value={f.gender}
+            onChange={set('gender')}
+          >
+            <option value="">Select</option>
+            <option value="female">Female</option>
+            <option value="male">Male</option>
+            <option value="other">Other / prefer not to say</option>
+          </select>
+
+          <p className="mt-1 text-xs text-soft">
+            Used only for gender-specific seats, such as hostel captains.
+          </p>
+        </div>
       </div>
-      <Err msg={err} /><Ok msg={msg} />
-      <Btn busy={busy}>{busy ? 'Saving...' : 'Save profile'}</Btn>
+
+      <Err msg={err} />
+      <Ok msg={msg} />
+
+      <Btn busy={busy}>
+        {busy ? 'Saving...' : 'Save profile'}
+      </Btn>
     </form>
   );
 }
@@ -152,16 +236,35 @@ function Election() {
   const [res, setRes] = useState(null);
   const [err, setErr] = useState('');
   const [acting, setActing] = useState('');
+  const [draft, setDraft] = useState({});
+  const [reviewing, setReviewing] = useState(false);
+  const [receipts, setReceipts] = useState({});
   const load = () => api(`/elections/${id}`).then((x) => { setD(x); if (x.status === 'closed') api(`/elections/${id}/results`).then(setRes); }).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, [id, user]);
   const act = async (key, path, body) => {
     setErr(''); setActing(key);
-    try { const r = await api(path, { method: 'POST', body }); await load(); return r; } catch (e) { setErr(e.message); } finally { setActing(''); }
+    try { const r = await api(path, { method: 'POST', body }); await load(); return r; } catch (e) { setErr(e.message); return null; } finally { setActing(''); }
   };
-  const onVote = (pid, candidateId) => act(`vote:${pid}`, `/positions/${pid}/vote`, { candidateId }).then((r) => { if (r?.receipt) saveReceipt(pid, r.receipt); return r; });
   if (!d) return err ? <Err msg={err} /> : <Loading text="Loading election..." />;
   const { election: e, status, me, positions } = d;
   const closed = status === 'closed';
+  const voting = status === 'voting';
+  const ballotPositions = positions.filter((p) => me?.registered && canJoin(p, me.gender) && p.candidates.length > 0 && !me?.voted?.[p.id]);
+  const alreadySubmitted = !!me?.registered && ballotPositions.length === 0 && positions.some((p) => me?.voted?.[p.id]);
+  const incomplete = ballotPositions.filter((p) => !draft[p.id]);
+  const submitBallot = async () => {
+    if (incomplete.length) { setErr(`Choose a candidate or abstain for: ${incomplete.map((p) => p.title).join(', ')}`); setReviewing(false); return; }
+    if (!confirm('Submit your complete ballot now? You will not be able to change your choices after submission.')) return;
+    const result = await act('ballot', `/elections/${id}/ballot`, {
+      choices: ballotPositions.map((p) => ({ positionId: p.id, candidateId: draft[p.id] })),
+    });
+    if (result?.receipts) {
+      setReceipts(result.receipts);
+      Object.entries(result.receipts).forEach(([pid, hash]) => saveReceipt(pid, hash));
+      setDraft({});
+      setReviewing(false);
+    }
+  };
   return (
     <>
       <div className="flex flex-wrap items-start justify-between gap-2"><h1 className="text-3xl font-extrabold text-white">{e.title}</h1><Badge s={status} /></div>
@@ -180,38 +283,72 @@ function Election() {
         </div>
       )}
 
-      <div><h2 className="text-2xl font-extrabold text-white">Voting order</h2><p className="text-sm text-soft">Seats are voted one after another, starting with the lowest. Results for all seats are published when the election ends.</p></div>
-      {positions.map((p, i) => <Seat key={p.id} p={p} step={i + 1} user={user} me={me} closed={closed} acting={acting} onVote={onVote} />)}
+      <div>
+        <h2 className="text-2xl font-extrabold text-white">{voting ? 'Your ballot' : 'Election seats'}</h2>
+        <p className="text-sm text-soft">{voting
+          ? 'Move freely between seats, revise any draft choice, then review and submit your ballot once. Draft choices are not recorded until submission.'
+          : 'All seats share the election-wide voting window. Results for every seat are published when the election ends.'}</p>
+      </div>
+
+      {voting && !user && <div className="panel"><Link className="font-bold text-brand underline" to={`/login?next=${encodeURIComponent(location.pathname)}`}>Log in</Link> to vote.</div>}
+      {voting && user && !me?.registered && <div className="panel text-soft">You did not register before the deadline, so you cannot vote in this election.</div>}
+      {voting && user && me?.registered && ballotPositions.length > 0 && (
+        <div className="panel space-y-3">
+          <div className="flex items-center justify-between gap-3"><b className="text-white">Ballot progress</b><span className="text-sm text-soft">{ballotPositions.filter((p) => !!draft[p.id]).length} of {ballotPositions.length} selected</span></div>
+          <div className="h-2 overflow-hidden rounded-full bg-raise"><div className="h-full rounded-full bg-gold transition-all" style={{ width: `${ballotPositions.length ? ballotPositions.filter((p) => !!draft[p.id]).length / ballotPositions.length * 100 : 0}%` }} /></div>
+          <div className="flex flex-wrap gap-2">{ballotPositions.map((p, i) => <a key={p.id} href={`#seat-${p.id}`} className={`rounded-lg border px-3 py-1.5 text-xs font-bold ${draft[p.id] ? 'border-good text-good' : 'border-line text-soft'}`}>{i + 1}. {p.title}{draft[p.id] ? ' ✓' : ''}</a>)}</div>
+        </div>
+      )}
+      {alreadySubmitted && voting && <div className="panel text-good font-bold">Your eligible votes have already been recorded.</div>}
+      {positions.map((p, i) => <Seat key={p.id} p={p} step={i + 1} user={user} me={me} closed={closed} voting={voting} acting={acting} pick={draft[p.id] || ''} setPick={(value) => setDraft((old) => ({ ...old, [p.id]: value }))} receipt={receipts[p.id] || ''} />)}
+
+      {voting && user && me?.registered && ballotPositions.length > 0 && (
+        <div className="panel space-y-3">
+          <h2 className="text-xl font-extrabold text-white">Finish your ballot</h2>
+          <p className="text-sm text-soft">You can continue editing choices above. Nothing is submitted until you confirm the final review.</p>
+          <Btn disabled={incomplete.length > 0} onClick={() => setReviewing(true)}>Review and submit ballot ({ballotPositions.length} seats)</Btn>
+          {incomplete.length > 0 && <p className="text-xs text-gold">Still to select: {incomplete.map((p) => p.title).join(', ')}</p>}
+        </div>
+      )}
+
+      {reviewing && (
+        <div className="panel space-y-4 border-gold">
+          <h2 className="text-2xl font-extrabold text-white">Review your ballot</h2>
+          <p className="text-sm text-soft">Check every selection. Use “Back to choices” if you want to make changes.</p>
+          <div className="divide-y divide-line">
+            {ballotPositions.map((p) => {
+              const choice = draft[p.id];
+              const candidate = p.candidates.find((c) => c.id === choice);
+              return <div key={p.id} className="flex items-center justify-between gap-3 py-3"><div><b className="text-white">{p.title}</b><p className="text-sm text-soft">{choice === 'abstain' ? 'Abstain' : candidate?.name || 'No selection'}</p></div><button className="btn-alt" onClick={() => { setReviewing(false); document.getElementById(`seat-${p.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>Edit</button></div>;
+            })}
+          </div>
+          <div className="flex flex-wrap gap-2"><button className="btn-alt" onClick={() => setReviewing(false)}>Back to choices</button><Btn busy={acting === 'ballot'} onClick={submitBallot}>{acting === 'ballot' ? 'Submitting ballot...' : 'Confirm and submit ballot'}</Btn></div>
+        </div>
+      )}
       {closed && !res && <Loading text="Loading results..." />}
       {res && <Results res={res} />}
     </>
   );
 }
 
-function Seat({ p, step, user, me, closed, acting, onVote }) {
-  const [pick, setPick] = useState('');
-  const [receipt, setReceipt] = useState('');
+function Seat({ p, step, user, me, closed, voting, acting, pick, setPick, receipt }) {
   const [showLedger, setShowLedger] = useState(false);
   const mine = me && canJoin(p, me.gender);
   const voted = !!me?.voted?.[p.id];
-  const busy = acting === `vote:${p.id}`;
-  const cast = async () => {
-    if (!confirm(`Cast this vote for ${p.title}? You cannot change it.`)) return;
-    const r = await onVote(p.id, pick);
-    if (r?.receipt) setReceipt(r.receipt);
-  };
+  const busy = acting === 'ballot';
+  const selectable = voting && user && me?.registered && mine && !voted && p.candidates.length > 0;
   return (
-    <section className={`panel space-y-4 ${p.status === 'open' ? 'border-gold' : ''}`}>
+    <section id={`seat-${p.id}`} className={`panel space-y-4 scroll-mt-24 ${selectable ? 'border-gold' : ''}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div><p className="text-xs font-bold tracking-wide text-soft">STEP {step}</p><h2 className="text-xl font-extrabold text-white">{p.title}</h2><p className="text-xs text-soft">{fmt(p.voteStart)} to {fmt(p.voteEnd)}</p></div>
-        <div className="flex items-center gap-2">{forWho(p.eligible)}<span className={`rounded-full px-3 py-1 text-xs font-bold ${p.status === 'open' ? 'bg-gold text-night' : 'bg-raise text-soft'}`}>{SEAT[p.status]}</span></div>
+        <div><p className="text-xs font-bold tracking-wide text-soft">SEAT {step}</p><h2 className="text-xl font-extrabold text-white">{p.title}</h2></div>
+        <div className="flex items-center gap-2">{forWho(p.eligible)}<span className={`rounded-full px-3 py-1 text-xs font-bold ${selectable ? 'bg-gold text-night' : 'bg-raise text-soft'}`}>{closed ? 'Closed' : voting ? (selectable ? 'Choose your vote' : voted ? 'Vote recorded' : 'Voting open') : SEAT[p.status]}</span></div>
       </div>
 
-      {p.status === 'open' && (
+      {voting && (
         !user ? <p><Link className="font-bold text-brand underline" to={`/login?next=${encodeURIComponent(location.pathname)}`}>Log in</Link> to vote.</p>
-        : voted ? <p className="font-extrabold text-good">Your vote for this seat is recorded.</p>
         : !me?.registered ? <p className="text-soft">You did not register before the deadline, so you cannot vote in this election.</p>
         : !mine ? <p className="text-soft">This seat is for {p.eligible} voters only.</p>
+        : voted ? <p className="font-extrabold text-good">Your vote for this seat is already recorded and cannot be changed.</p>
         : p.candidates.length < 1 ? <p className="text-soft">There are no approved candidates for this seat, so no vote will be held.</p>
         : (
           <div className="space-y-3">
@@ -220,30 +357,25 @@ function Seat({ p, step, user, me, closed, acting, onVote }) {
               {p.candidates.map((c) => (
                 <label key={c.id} className={`panel relative flex cursor-pointer gap-4 transition has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-gold ${pick === c.id ? 'border-gold bg-gold/10' : 'hover:border-brand'}`}>
                   <input type="radio" name={`c-${p.id}`} className="sr-only" checked={pick === c.id} onChange={() => setPick(c.id)} disabled={busy} />
-                  <span aria-hidden className={`absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full border-2 ${pick === c.id ? 'border-gold bg-gold text-night' : 'border-line'}`}>
-                    {pick === c.id && <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="3"><path d="M4 10.5l4 4 8-9" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                  </span>
+                  <span aria-hidden className={`absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full border-2 ${pick === c.id ? 'border-gold bg-gold text-night' : 'border-line'}`}>{pick === c.id && '✓'}</span>
                   <Avatar src={c.photoUrl} name={c.name} size={72} />
                   <span className="min-w-0 pr-8"><b className="block text-white">{c.name}</b><span className="text-xs text-soft">{c.department}</span><span className="mt-2 line-clamp-4 block text-sm">{c.manifesto}</span></span>
                 </label>
               ))}
             </div>
-            <label className={`panel relative flex cursor-pointer items-center gap-4 transition has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-gold ${pick === 'abstain' ? 'border-gold bg-gold/10' : 'hover:border-brand'}`}>
+            <label className={`panel relative flex cursor-pointer items-center gap-4 transition ${pick === 'abstain' ? 'border-gold bg-gold/10' : 'hover:border-brand'}`}>
               <input type="radio" name={`c-${p.id}`} className="sr-only" checked={pick === 'abstain'} onChange={() => setPick('abstain')} disabled={busy} />
-              <span aria-hidden className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 ${pick === 'abstain' ? 'border-gold bg-gold text-night' : 'border-line'}`}>
-                {pick === 'abstain' && <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="3"><path d="M4 10.5l4 4 8-9" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-              </span>
-              <span><b className="block text-white">Abstain</b><span className="text-sm text-soft">I do not support any candidate for this seat. Your ballot is recorded but counts for no one.</span></span>
+              <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 ${pick === 'abstain' ? 'border-gold bg-gold text-night' : 'border-line'}`}>{pick === 'abstain' && '✓'}</span>
+              <span><b className="block text-white">Abstain</b><span className="text-sm text-soft">Record a ballot for this seat without supporting a candidate.</span></span>
             </label>
-            <Btn busy={busy} disabled={!pick} onClick={cast}>{busy ? 'Recording your vote...' : pick === 'abstain' ? 'Cast my ballot: abstain' : pick ? `Cast my vote for ${p.candidates.find((c) => c.id === pick)?.name}` : 'Select a candidate or abstain'}</Btn>
+            {pick && <p className="text-xs font-bold text-good">Draft saved in this page only — not submitted yet.</p>}
           </div>
         )
       )}
 
-      {p.status !== 'open' && !closed && p.candidates.length > 0 && <Candidates list={p.candidates} />}
-      {p.status === 'upcoming' && p.candidates.length === 0 && <p className="text-sm text-soft">Candidates appear here once the admin approves applications.</p>}
-      {p.status === 'closed' && !closed && <p className="text-sm text-soft">Voting for this seat has ended. Results are published when the whole election ends.</p>}
-      {receipt && <div className="rounded-xl border border-gold/60 p-4"><p className="font-extrabold text-gold">Your receipt for {p.title}</p><p className="mt-1 break-all font-mono text-xs">{receipt}</p><p className="mt-2 text-sm text-soft">Saved on this device and emailed to you. It proves your ballot exists without showing your choice.</p></div>}
+      {!voting && !closed && p.candidates.length > 0 && <Candidates list={p.candidates} />}
+      {p.status === 'upcoming' && p.candidates.length === 0 && !closed && <p className="text-sm text-soft">Candidates appear here once the admin approves applications.</p>}
+      {receipt && <div className="rounded-xl border border-gold/60 p-4"><p className="font-extrabold text-gold">Your receipt for {p.title}</p><p className="mt-1 break-all font-mono text-xs">{receipt}</p><p className="mt-2 text-sm text-soft">It proves your ballot exists without showing your choice.</p></div>}
       {user && me?.registered && mine && <Tracker pid={p.id} voted={voted} closed={closed} cands={p.candidates} />}
       <details onToggle={(e) => setShowLedger(e.currentTarget.open)}>
         <summary className="cursor-pointer text-sm font-bold text-brand">Public ballot ledger for this seat</summary>

@@ -15,7 +15,7 @@ const PRESETS = {
   Company: [['Head of HR', 'any'], ['Head of Finance', 'any'], ['Head of Marketing', 'any'], ['Head of ICT', 'any']],
 };
 const seat = ([title, eligible]) => ({ title, eligible });
-const blank = { title: '', description: '', regStart: '', regEnd: '', voteStart: '', slotMinutes: 60, gapMinutes: 15, positions: [{ title: '', eligible: 'any' }] };
+const blank = { title: '', description: '', regStart: '', regEnd: '', voteStart: '', voteEnd: '', positions: [{ title: '', eligible: 'any' }] };
 
 function CreateElection({ onCreated }) {
   const [f, setF] = useState(blank);
@@ -27,7 +27,7 @@ function CreateElection({ onCreated }) {
   const submit = (e) => {
     e.preventDefault(); setErr('');
     return run(async () => {
-      try { await api('/admin/elections', { method: 'POST', body: { ...f, regStart: iso(f.regStart), regEnd: iso(f.regEnd), voteStart: iso(f.voteStart) } }); setF(blank); await onCreated(); }
+      try { await api('/admin/elections', { method: 'POST', body: { ...f, regStart: iso(f.regStart), regEnd: iso(f.regEnd), voteStart: iso(f.voteStart), voteEnd: iso(f.voteEnd) } }); setF(blank); await onCreated(); }
       catch (x) { setErr(x.message); }
     });
   };
@@ -40,7 +40,7 @@ function CreateElection({ onCreated }) {
       <div className="grid gap-4 sm:grid-cols-2">{dt('regStart', 'Voter registration opens')}{dt('regEnd', 'Voter registration closes')}</div>
 
       <div className="space-y-3 rounded-xl border border-line p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-extrabold text-white">Seats, in voting order</h3><p className="text-xs text-soft">Put the lowest seat first and the top seat (President) last. Seats are voted one after another.</p></div>
+        <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-extrabold text-white">Ballot seats</h3><p className="text-xs text-soft">Voters can move between seats, revise choices, and submit all eligible choices together before voting closes.</p></div>
           <div className="flex gap-2">{Object.entries(PRESETS).map(([n, ps]) => <button type="button" key={n} className="btn-alt" onClick={() => setF({ ...f, positions: ps.map(seat) })}>{n} example</button>)}</div></div>
         {f.positions.map((p, i) => (
           <div key={i} className="flex flex-wrap items-center gap-2">
@@ -55,12 +55,11 @@ function CreateElection({ onCreated }) {
         <button type="button" className="btn-alt" onClick={() => setF({ ...f, positions: [...f.positions, { title: '', eligible: 'any' }] })}>Add a seat</button>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        {dt('voteStart', 'First seat opens')}
-        <div><label className="label" htmlFor="sm">Minutes of voting per seat</label><input id="sm" className="input" type="number" min="5" required value={f.slotMinutes} onChange={set('slotMinutes')} /></div>
-        <div><label className="label" htmlFor="gm">Gap between seats (minutes)</label><input id="gm" className="input" type="number" min="0" value={f.gapMinutes} onChange={set('gapMinutes')} /></div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        {dt('voteStart', 'Voting opens')}
+        {dt('voteEnd', 'Voting closes')}
       </div>
-      <p className="text-xs text-soft">Times use your local time zone. Seat windows are worked out from these numbers and can be adjusted per seat afterwards. Everything locks once voter registration opens.</p>
+      <p className="text-xs text-soft">Times use your local time zone. Every seat shares this voting window. Voters can review and revise choices until they submit one complete ballot. The schedule locks once voter registration opens.</p>
       <Err msg={err} /><Btn busy={busy}>{busy ? 'Creating...' : 'Create election'}</Btn>
     </form>
   );
@@ -135,8 +134,7 @@ function SeatForm({ initial, label, onSubmit, onCancel }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <div><label className="label">Seat title</label><input className="input" required value={f.title} onChange={set('title')} /></div>
         <div><label className="label">Who can vote and stand</label><select className="input" value={f.eligible} onChange={set('eligible')}><option value="any">Everyone</option><option value="female">Female only</option><option value="male">Male only</option></select></div>
-        <div><label className="label">Voting opens</label><input className="input" type="datetime-local" required value={f.voteStart} onChange={set('voteStart')} /></div>
-        <div><label className="label">Voting closes</label><input className="input" type="datetime-local" required value={f.voteEnd} onChange={set('voteEnd')} /></div>
+        <p className="text-sm text-soft sm:col-span-2">All seats use the election-wide voting window: {fmt(initial.voteStart)} to {fmt(initial.voteEnd)}.</p>
       </div>
       <Err msg={err} />
       <div className="flex gap-2"><Btn busy={busy}>{busy ? 'Saving...' : label}</Btn>{onCancel && <button type="button" className="btn-alt" onClick={onCancel}>Cancel</button>}</div>
