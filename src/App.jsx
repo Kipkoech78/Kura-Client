@@ -62,7 +62,7 @@ function Home() {
           <Link key={e._id} to={`/election/${e._id}`} className="panel space-y-3 transition hover:border-brand">
             <div className="flex items-start justify-between gap-2"><h2 className="text-lg font-extrabold text-white">{e.title}</h2><Badge s={e.status} /></div>
             <p className="line-clamp-2 text-sm text-soft">{e.description}</p>
-            <p className="text-xs text-soft">Voting: {fmt(e.voteStart)} to {fmt(e.voteEnd)}</p>
+            <p className="text-xs text-soft">{e.seats} {e.seats === 1 ? 'seat' : 'seats'}. Voting: {fmt(e.voteStart)} to {fmt(e.voteEnd)}</p>
           </Link>
         ))}
       </div>
@@ -110,7 +110,7 @@ function Login() {
 
 function Profile() {
   const { user, setUser } = useAuth();
-  const [f, setF] = useState({ name: user.name, phone: user.phone, employeeId: user.employeeId, department: user.department, photoUrl: user.photoUrl });
+  const [f, setF] = useState({ name: user.name, phone: user.phone, employeeId: user.employeeId, department: user.department, gender: user.gender || '', photoUrl: user.photoUrl });
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('');
   const [busy, run] = useBusy();
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -129,59 +129,97 @@ function Profile() {
         {field('phone', 'Phone number', { type: 'tel' })}
         {field('employeeId', 'Employee ID')}
       </div>
-      {field('department', 'Department')}
+      <div className="grid gap-4 sm:grid-cols-2">
+        {field('department', 'Department')}
+        <div><label className="label" htmlFor="gender">Gender</label>
+          <select id="gender" className="input" required value={f.gender} onChange={set('gender')}><option value="">Select</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other / prefer not to say</option></select>
+          <p className="mt-1 text-xs text-soft">Used only for gender-specific seats, such as hostel captains.</p></div>
+      </div>
       <Err msg={err} /><Ok msg={msg} />
       <Btn busy={busy}>{busy ? 'Saving...' : 'Save profile'}</Btn>
     </form>
   );
 }
 
+const SEAT = { upcoming: 'Scheduled', open: 'Voting open', closed: 'Closed' };
+const forWho = (el) => (el === 'any' ? null : <span className="rounded-full border border-gold/50 px-2 py-0.5 text-xs font-bold text-gold">{el === 'female' ? 'Female only' : 'Male only'}</span>);
+const canJoin = (p, gender) => p.eligible === 'any' || p.eligible === gender;
+
 function Election() {
   const { id } = useParams();
   const { user } = useAuth();
   const [d, setD] = useState(null);
-  const [pick, setPick] = useState('');
-  const [receipt, setReceipt] = useState('');
   const [res, setRes] = useState(null);
   const [err, setErr] = useState('');
   const [acting, setActing] = useState('');
   const load = () => api(`/elections/${id}`).then((x) => { setD(x); if (x.status === 'closed') api(`/elections/${id}/results`).then(setRes); }).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, [id, user]);
-  const act = (path, body) => async () => {
-    setErr(''); setActing(path);
-    try { const r = await api(`/elections/${id}/${path}`, { method: 'POST', body }); if (r.receipt) { setReceipt(r.receipt); saveReceipt(id, r.receipt); } await load(); } catch (e) { setErr(e.message); } finally { setActing(''); }
+  const act = async (key, path, body) => {
+    setErr(''); setActing(key);
+    try { const r = await api(path, { method: 'POST', body }); await load(); return r; } catch (e) { setErr(e.message); } finally { setActing(''); }
   };
+  const onVote = (pid, candidateId) => act(`vote:${pid}`, `/positions/${pid}/vote`, { candidateId }).then((r) => { if (r?.receipt) saveReceipt(pid, r.receipt); return r; });
   if (!d) return err ? <Err msg={err} /> : <Loading text="Loading election..." />;
-  const { election: e, status, me, candidates } = d;
+  const { election: e, status, me, positions } = d;
+  const closed = status === 'closed';
   return (
     <>
       <div className="flex flex-wrap items-start justify-between gap-2"><h1 className="text-3xl font-extrabold text-white">{e.title}</h1><Badge s={status} /></div>
       <p className="max-w-3xl text-soft">{e.description}</p>
       <Phases e={e} status={status} />
-      <p className="text-sm text-soft"><b className="text-white">{d.registered}</b> registered voters. <b className="text-white">{d.votes}</b> ballots cast.</p>
+      <p className="text-sm text-soft"><b className="text-white">{d.registered}</b> registered voters. <b className="text-white">{positions.length}</b> seats.</p>
       <Err msg={err} />
 
       {status === 'registration' && (
         <div className="panel flex flex-wrap items-center justify-between gap-3">
-          <div><h2 className="font-extrabold text-white">Voter registration is open</h2><p className="text-sm text-soft">One click. Your details come from your profile.</p></div>
+          <div><h2 className="font-extrabold text-white">Voter registration is open</h2><p className="text-sm text-soft">One click registers you for every seat you are eligible for.</p></div>
           {!user ? <Link className="btn" to={`/login?next=/election/${id}`}>Log in to register</Link>
             : me?.registered ? <span className="font-extrabold text-good">You are registered</span>
             : !me?.profileComplete ? <Link className="btn" to="/profile">Complete profile first</Link>
-            : <Btn busy={acting === 'register'} onClick={act('register')}>{acting === 'register' ? 'Registering...' : 'Register to vote'}</Btn>}
+            : <Btn busy={acting === 'register'} onClick={() => act('register', `/elections/${id}/register`)}>{acting === 'register' ? 'Registering...' : 'Register to vote'}</Btn>}
         </div>
       )}
 
-      {status === 'voting' && (
-        !user ? <p><Link className="font-bold text-brand underline" to={`/login?next=/election/${id}`}>Log in</Link> to vote.</p>
-        : me?.voted ? <div className="panel border-good/50"><h2 className="font-extrabold text-good">Your vote is recorded</h2><p className="text-sm text-soft">Track it under My votes.</p></div>
-        : !me?.registered ? <div className="panel text-soft">You did not register before the deadline, so you cannot vote in this election.</div>
+      <div><h2 className="text-2xl font-extrabold text-white">Voting order</h2><p className="text-sm text-soft">Seats are voted one after another, starting with the lowest. Results for all seats are published when the election ends.</p></div>
+      {positions.map((p, i) => <Seat key={p.id} p={p} step={i + 1} user={user} me={me} closed={closed} acting={acting} onVote={onVote} />)}
+      {closed && !res && <Loading text="Loading results..." />}
+      {res && <Results res={res} />}
+    </>
+  );
+}
+
+function Seat({ p, step, user, me, closed, acting, onVote }) {
+  const [pick, setPick] = useState('');
+  const [receipt, setReceipt] = useState('');
+  const [showLedger, setShowLedger] = useState(false);
+  const mine = me && canJoin(p, me.gender);
+  const voted = !!me?.voted?.[p.id];
+  const busy = acting === `vote:${p.id}`;
+  const cast = async () => {
+    if (!confirm(`Cast this vote for ${p.title}? You cannot change it.`)) return;
+    const r = await onVote(p.id, pick);
+    if (r?.receipt) setReceipt(r.receipt);
+  };
+  return (
+    <section className={`panel space-y-4 ${p.status === 'open' ? 'border-gold' : ''}`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div><p className="text-xs font-bold tracking-wide text-soft">STEP {step}</p><h2 className="text-xl font-extrabold text-white">{p.title}</h2><p className="text-xs text-soft">{fmt(p.voteStart)} to {fmt(p.voteEnd)}</p></div>
+        <div className="flex items-center gap-2">{forWho(p.eligible)}<span className={`rounded-full px-3 py-1 text-xs font-bold ${p.status === 'open' ? 'bg-gold text-night' : 'bg-raise text-soft'}`}>{SEAT[p.status]}</span></div>
+      </div>
+
+      {p.status === 'open' && (
+        !user ? <p><Link className="font-bold text-brand underline" to={`/login?next=${encodeURIComponent(location.pathname)}`}>Log in</Link> to vote.</p>
+        : voted ? <p className="font-extrabold text-good">Your vote for this seat is recorded.</p>
+        : !me?.registered ? <p className="text-soft">You did not register before the deadline, so you cannot vote in this election.</p>
+        : !mine ? <p className="text-soft">This seat is for {p.eligible} voters only.</p>
+        : p.candidates.length < 1 ? <p className="text-soft">There are no approved candidates for this seat, so no vote will be held.</p>
         : (
           <div className="space-y-3">
-            <h2 className="text-xl font-extrabold text-white">Choose one candidate</h2>
+            <h3 className="font-extrabold text-white">Choose one candidate</h3>
             <div className="grid gap-3 sm:grid-cols-2">
-              {candidates.map((c) => (
+              {p.candidates.map((c) => (
                 <label key={c.id} className={`panel relative flex cursor-pointer gap-4 transition has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-gold ${pick === c.id ? 'border-gold bg-gold/10' : 'hover:border-brand'}`}>
-                  <input type="radio" name="c" className="sr-only" checked={pick === c.id} onChange={() => setPick(c.id)} disabled={acting === 'vote'} />
+                  <input type="radio" name={`c-${p.id}`} className="sr-only" checked={pick === c.id} onChange={() => setPick(c.id)} disabled={busy} />
                   <span aria-hidden className={`absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full border-2 ${pick === c.id ? 'border-gold bg-gold text-night' : 'border-line'}`}>
                     {pick === c.id && <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="3"><path d="M4 10.5l4 4 8-9" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                   </span>
@@ -190,49 +228,55 @@ function Election() {
                 </label>
               ))}
             </div>
-            <Btn busy={acting === 'vote'} disabled={!pick} onClick={() => confirm('Cast this vote? You cannot change it.') && act('vote', { candidateId: pick })()}>{acting === 'vote' ? 'Recording your vote...' : pick ? `Cast my vote for ${candidates.find((c) => c.id === pick)?.name}` : 'Select a candidate'}</Btn>
+            <label className={`panel relative flex cursor-pointer items-center gap-4 transition has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-gold ${pick === 'abstain' ? 'border-gold bg-gold/10' : 'hover:border-brand'}`}>
+              <input type="radio" name={`c-${p.id}`} className="sr-only" checked={pick === 'abstain'} onChange={() => setPick('abstain')} disabled={busy} />
+              <span aria-hidden className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 ${pick === 'abstain' ? 'border-gold bg-gold text-night' : 'border-line'}`}>
+                {pick === 'abstain' && <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="3"><path d="M4 10.5l4 4 8-9" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+              </span>
+              <span><b className="block text-white">Abstain</b><span className="text-sm text-soft">I do not support any candidate for this seat. Your ballot is recorded but counts for no one.</span></span>
+            </label>
+            <Btn busy={busy} disabled={!pick} onClick={cast}>{busy ? 'Recording your vote...' : pick === 'abstain' ? 'Cast my ballot: abstain' : pick ? `Cast my vote for ${p.candidates.find((c) => c.id === pick)?.name}` : 'Select a candidate or abstain'}</Btn>
           </div>
         )
       )}
 
-      {receipt && <div className="panel border-gold/60"><p className="font-extrabold text-gold">Your receipt</p><p className="mt-1 break-all font-mono text-xs">{receipt}</p><p className="mt-2 text-sm text-soft">Saved on this device and emailed to you. It proves your ballot exists without showing your choice.</p></div>}
-
-      {user && me?.registered && <Tracker id={id} registered voted={me.voted} status={status} />}
-
-      {status !== 'closed' && candidates.length > 0 && status !== 'voting' && <Candidates list={candidates} />}
-      {res && <Results res={res} />}
-      <Ledger id={id} status={status} candidates={candidates} />
-    </>
+      {p.status !== 'open' && !closed && p.candidates.length > 0 && <Candidates list={p.candidates} />}
+      {p.status === 'upcoming' && p.candidates.length === 0 && <p className="text-sm text-soft">Candidates appear here once the admin approves applications.</p>}
+      {p.status === 'closed' && !closed && <p className="text-sm text-soft">Voting for this seat has ended. Results are published when the whole election ends.</p>}
+      {receipt && <div className="rounded-xl border border-gold/60 p-4"><p className="font-extrabold text-gold">Your receipt for {p.title}</p><p className="mt-1 break-all font-mono text-xs">{receipt}</p><p className="mt-2 text-sm text-soft">Saved on this device and emailed to you. It proves your ballot exists without showing your choice.</p></div>}
+      {user && me?.registered && mine && <Tracker pid={p.id} voted={voted} closed={closed} cands={p.candidates} />}
+      <details onToggle={(e) => setShowLedger(e.currentTarget.open)}>
+        <summary className="cursor-pointer text-sm font-bold text-brand">Public ballot ledger for this seat</summary>
+        {showLedger && <div className="mt-3"><Ledger pid={p.id} candidates={p.candidates} /></div>}
+      </details>
+    </section>
   );
 }
 
 function Candidates({ list }) {
   return (
-    <div className="space-y-3"><h2 className="text-xl font-extrabold text-white">Approved candidates</h2>
+    <div className="space-y-2"><h3 className="font-extrabold text-white">Approved candidates</h3>
       <div className="grid gap-3 sm:grid-cols-2">{list.map((c) => (
-        <div key={c.id} className="panel flex gap-4"><Avatar src={c.photoUrl} name={c.name} size={64} /><div><b className="text-white">{c.name}</b><p className="text-xs text-soft">{c.department}</p><p className="mt-2 text-sm">{c.manifesto}</p></div></div>
+        <div key={c.id} className="flex gap-4 rounded-xl border border-line bg-night/40 p-4"><Avatar src={c.photoUrl} name={c.name} size={56} /><div><b className="text-white">{c.name}</b><p className="text-xs text-soft">{c.department}</p><p className="mt-2 text-sm">{c.manifesto}</p></div></div>
       ))}</div></div>
   );
 }
 
-// Follows one ballot from registration to the final count, using only the voter's own receipt
-export function Tracker({ id, registered, voted, status }) {
+// Follows one ballot (one seat) from casting to the final count, using only the voter's own receipt
+function Tracker({ pid, voted, closed, cands }) {
   const [ledger, setLedger] = useState(null);
-  const [cands, setCands] = useState([]);
-  const receipt = getReceipts()[id];
-  useEffect(() => { api(`/elections/${id}/ledger`).then(setLedger); api(`/elections/${id}`).then((x) => setCands(x.candidates)); }, [id, voted, status]);
+  const receipt = getReceipts()[pid];
+  useEffect(() => { api(`/positions/${pid}/ledger`).then(setLedger); }, [pid, voted, closed]);
   const entry = receipt && ledger?.ballots.find((b) => b.hash === receipt);
-  const closed = status === 'closed';
-  const choice = closed && entry && cands.find((c) => c.id === entry.candidateId)?.name;
+  const choice = closed && entry && (entry.candidateId === 'abstain' ? 'Abstained' : cands.find((c) => c.id === entry.candidateId)?.name);
   const stages = [
-    ['Registered', registered, 'You are on the voter list.'],
-    ['Ballot cast', voted, voted ? 'The server marked you as voted. You cannot vote twice.' : 'Waiting for you to vote.'],
-    ['Recorded in the public ledger', !!entry, entry ? `Your ballot is #${entry.index + 1} in the chain.` : voted && !receipt ? 'No receipt on this device. Check your email and paste it into the ledger search below.' : 'Appears after you vote.'],
-    ['Counted in the final result', closed && !!entry && ledger.valid, closed ? (entry ? `Your ballot shows: ${choice || 'unknown'}. Chain verified: ${ledger.valid ? 'yes' : 'NO'}.` : 'Your ballot was not found.') : 'Shown when voting ends.'],
+    ['Ballot cast', voted, voted ? 'The server marked you as voted for this seat. You cannot vote twice.' : 'Waiting for you to vote.'],
+    ['Recorded in the public ledger', !!entry, entry ? `Your ballot is #${entry.index + 1} in this seat's chain.` : voted && !receipt ? 'No receipt on this device. Check your email and paste it into the ledger search.' : 'Appears after you vote.'],
+    ['Counted in the final result', closed && !!entry && ledger.valid, closed ? (entry ? `Your ballot shows: ${choice || 'unknown'}. Chain verified: ${ledger.valid ? 'yes' : 'NO'}.` : 'Your ballot was not found.') : 'Shown when the election ends.'],
   ];
   return (
-    <ol className="panel space-y-3">
-      <h2 className="font-extrabold text-white">Track your vote</h2>
+    <ol className="space-y-2 rounded-xl border border-line bg-night/40 p-4">
+      <h3 className="font-extrabold text-white">Track your vote</h3>
       {!ledger && <p className="flex items-center gap-2 text-xs text-soft"><Spinner /> Checking the public ledger...</p>}
       {stages.map(([t, ok, note]) => (
         <li key={t} className="flex gap-3"><span aria-hidden className={`mt-1 h-3 w-3 shrink-0 rounded-full ${ok ? 'bg-good' : 'bg-line'}`} /><div><p className={`text-sm font-bold ${ok ? 'text-white' : 'text-soft'}`}>{t}</p><p className="text-xs text-soft">{note}</p></div></li>
@@ -246,60 +290,81 @@ function MyVotes() {
   useEffect(() => { api('/me/elections').then(setList); }, []);
   return (
     <>
-      <div><h1 className="text-3xl font-extrabold text-white">My votes</h1><p className="text-soft">Follow every ballot you cast, from registration to the final count.</p></div>
+      <div><h1 className="text-3xl font-extrabold text-white">My votes</h1><p className="text-soft">Follow every ballot you cast, seat by seat, from voting to the final count.</p></div>
       {!list && <Loading text="Loading your elections..." />}
       {list && !list.length && <div className="panel text-soft">You have not registered for any election yet. <Link to="/" className="font-bold text-brand underline">Browse elections</Link></div>}
-      {list?.map((x) => (
-        <div key={x.id} className="space-y-2">
-          <div className="flex items-center justify-between"><Link to={`/election/${x.id}`} className="text-lg font-extrabold text-white hover:text-brand">{x.title}</Link><Badge s={x.status} /></div>
-          <Tracker id={x.id} registered voted={x.voted} status={x.status} />
-        </div>
-      ))}
+      {list?.map((x) => <MyElection key={x.id} x={x} />)}
     </>
   );
 }
 
-function Results({ res }) {
-  const top = res.results[0]?.votes;
+function MyElection({ x }) {
+  const { user } = useAuth();
+  const [d, setD] = useState(null);
+  useEffect(() => { api(`/elections/${x.id}`).then(setD); }, [x.id]);
+  const seats = d?.positions.filter((p) => canJoin(p, user.gender)) || [];
   return (
     <div className="panel space-y-4">
-      <div><h2 className="text-2xl font-extrabold text-white">Final results</h2><p className="text-sm text-soft">{res.total} of {res.registered} registered voters voted. Ballot chain {res.valid ? 'verified' : 'FAILED verification'}.</p></div>
-      {res.results.map((c) => (
-        <div key={c.id} className="flex items-center gap-3">
-          <Avatar src={c.photoUrl} name={c.name} size={44} />
-          <div className="flex-1"><div className="flex justify-between text-sm font-bold"><span className="text-white">{c.name}{c.votes === top && top > 0 ? ' (leading)' : ''}</span><span>{c.votes} ({res.total ? Math.round((c.votes / res.total) * 100) : 0}%)</span></div>
-            <div className="mt-1 h-2 rounded bg-raise"><div className={`h-2 rounded ${c.votes === top ? 'bg-gold' : 'bg-brand'}`} style={{ width: `${res.total ? (c.votes / res.total) * 100 : 0}%` }} /></div></div>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><Link to={`/election/${x.id}`} className="text-lg font-extrabold text-white hover:text-brand">{x.title}</Link><Badge s={x.status} /></div>
+      <p className="text-sm text-soft">Voted in {x.voted} of {x.seats} seats you can vote for.</p>
+      {!d && <Loading text="Loading seats..." />}
+      {seats.map((p) => (
+        <div key={p.id} className="space-y-2"><div className="flex items-center gap-2"><h3 className="font-bold text-white">{p.title}</h3>{forWho(p.eligible)}<span className="text-xs text-soft">{SEAT[p.status]}</span></div>
+          <Tracker pid={p.id} voted={!!d.me?.voted?.[p.id]} closed={d.status === 'closed'} cands={p.candidates} /></div>
       ))}
     </div>
   );
 }
 
-function Ledger({ id, status, candidates }) {
+function Results({ res }) {
+  return (
+    <div className="space-y-4">
+      <h2 className="text-3xl font-extrabold text-white">Final results</h2>
+      {res.positions.map((p) => {
+        const top = p.results[0]?.votes;
+        return (
+          <div key={p.id} className="panel space-y-4">
+            <div><div className="flex flex-wrap items-center gap-2"><h3 className="text-xl font-extrabold text-white">{p.title}</h3>{forWho(p.eligible)}</div>
+              <p className="text-sm text-soft">{p.total} of {p.eligibleVoters} eligible registered voters voted{p.abstained > 0 && `, ${p.abstained} abstained`}. Ballot chain {p.valid ? 'verified' : 'FAILED verification'}.</p></div>
+            {!p.results.length && <p className="text-soft">No approved candidates for this seat.</p>}
+            {p.results.map((c) => (
+              <div key={c.id} className="flex items-center gap-3">
+                <Avatar src={c.photoUrl} name={c.name} size={44} />
+                <div className="flex-1"><div className="flex justify-between text-sm font-bold"><span className="text-white">{c.name}{c.votes === top && top > 0 ? ' (leading)' : ''}</span><span>{c.votes} ({p.total ? Math.round((c.votes / p.total) * 100) : 0}%)</span></div>
+                  <div className="mt-1 h-2 rounded bg-raise"><div className={`h-2 rounded ${c.votes === top ? 'bg-gold' : 'bg-brand'}`} style={{ width: `${p.total ? (c.votes / p.total) * 100 : 0}%` }} /></div></div>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Ledger({ pid, candidates }) {
   const [ledger, setLedger] = useState(null);
   const [q, setQ] = useState('');
   const [self, setSelf] = useState(null);
-  useEffect(() => { api(`/elections/${id}/ledger`).then(setLedger); }, [id, status]);
-  // the browser recomputes every hash itself once the election has closed
+  useEffect(() => { api(`/positions/${pid}/ledger`).then(setLedger); }, [pid]);
+  // once the election has closed the browser recomputes every hash itself
   useEffect(() => {
     if (!ledger?.closed) return;
     (async () => {
       let prev = '0'.repeat(64);
       for (const [i, b] of ledger.ballots.entries()) {
-        if (b.index !== i || b.prevHash !== prev || (await sha256(`${b.index}|${b.election}|${b.candidateId}|${b.nonce}|${b.prevHash}`)) !== b.hash) return setSelf(false);
+        if (b.index !== i || b.prevHash !== prev || (await sha256(`${b.index}|${b.position}|${b.candidateId}|${b.nonce}|${b.prevHash}`)) !== b.hash) return setSelf(false);
         prev = b.hash;
       }
       setSelf(true);
     })();
   }, [ledger]);
-  if (!ledger) return <div className="panel"><Loading text="Loading ledger..." /></div>;
+  if (!ledger) return <Loading text="Loading ledger..." />;
   const hit = q.trim().length === 64 ? ledger.ballots.find((b) => b.hash === q.trim().toLowerCase()) : null;
   return (
-    <div className="panel space-y-3">
-      <h2 className="text-xl font-extrabold text-white">Public ballot ledger</h2>
+    <div className="space-y-3">
       <p className="text-sm text-soft">Each ballot is chained to the one before it, so changing or removing one breaks the chain. Server check: <b className={ledger.valid ? 'text-good' : 'text-bad'}>{ledger.valid ? 'intact' : 'BROKEN'}</b>.{ledger.closed && self !== null && <> Your browser's own recount: <b className={self ? 'text-good' : 'text-bad'}>{self ? 'intact' : 'BROKEN'}</b>.</>}</p>
       <input className="input font-mono" placeholder="Paste a receipt to find a ballot" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Receipt search" />
-      {hit && <p className="text-sm font-bold text-good">Found: ballot #{hit.index + 1}{hit.candidateId && ` for ${candidates.find((c) => c.id === hit.candidateId)?.name || 'a candidate'}`}.</p>}
+      {hit && <p className="text-sm font-bold text-good">Found: ballot #{hit.index + 1}{hit.candidateId && (hit.candidateId === 'abstain' ? ' (abstained)' : ` for ${candidates.find((c) => c.id === hit.candidateId)?.name || 'a candidate'}`)}.</p>}
       {q.trim().length === 64 && !hit && <p className="text-sm font-bold text-bad">No ballot with that receipt.</p>}
       <div className="max-h-56 overflow-auto rounded-lg bg-night p-3 font-mono text-xs text-soft">
         {ledger.ballots.length ? ledger.ballots.map((b) => <p key={b.index} className="break-all py-0.5">#{b.index + 1} {b.hash}</p>) : 'No ballots yet.'}
@@ -312,29 +377,36 @@ function Apply() {
   const { code } = useParams();
   const { user } = useAuth();
   const [d, setD] = useState(null);
-  const [f, setF] = useState({ manifesto: '', photoUrl: '' });
+  const [f, setF] = useState({ positionId: '', manifesto: '', photoUrl: '' });
   const [err, setErr] = useState('');
   const [busy, run] = useBusy();
   const load = () => api(`/apply/${code}`).then(setD).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, [code, user]);
-  const submit = (e) => { e.preventDefault(); setErr(''); return run(async () => { try { await api(`/apply/${code}`, { method: 'POST', body: f }); await load(); } catch (x) { setErr(x.message); } }); };
+  const submit = (e) => { e.preventDefault(); setErr(''); return run(async () => { try { await api(`/apply/${code}`, { method: 'POST', body: f }); setF({ positionId: '', manifesto: '', photoUrl: '' }); await load(); } catch (x) { setErr(x.message); } }); };
   if (!d) return err ? <Err msg={err} /> : <Loading text="Loading application..." />;
+  const available = d.standing ? [] : d.positions.filter((p) => p.open && p.canApply && !p.mine);
+  const appStatus = (p) => p.mine ? (p.mine.status === 'pending' ? 'Under review' : p.mine.status === 'approved' ? 'Approved. You are on the ballot' : `Not approved. ${p.mine.note || ''}`) : !p.open ? 'Applications closed' : p.canApply === false ? `For ${p.eligible} candidates only` : 'Open';
   return (
     <div className="mx-auto max-w-xl space-y-4">
       <div><p className="text-sm font-bold text-gold">Candidate application</p><h1 className="text-3xl font-extrabold text-white">{d.title}</h1><p className="text-soft">{d.description}</p></div>
+      <div className="panel space-y-2"><h2 className="font-extrabold text-white">Seats</h2>
+        {d.positions.map((p) => <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2 text-sm first:border-0 first:pt-0"><span className="font-bold text-white">{p.title} {forWho(p.eligible)}</span><span className={p.mine?.status === 'approved' ? 'font-bold text-good' : 'text-soft'}>{appStatus(p)}</span></div>)}
+      </div>
       {!d.open ? <div className="panel text-soft">Applications for this election are closed.</div>
         : !user ? <div className="panel space-y-3"><p>Log in with your work email to apply.</p><Link className="btn" to={`/login?next=/apply/${code}`}>Log in</Link></div>
-        : d.mine ? <div className="panel"><p className="font-extrabold text-white">Application {d.mine.status}</p><p className="text-sm text-soft">{d.mine.status === 'pending' ? 'An admin is reviewing it. Check back here.' : d.mine.status === 'approved' ? 'You are on the ballot.' : `Not approved. ${d.mine.note}`}</p></div>
-        : !d.profileComplete ? <div className="panel space-y-3"><p>Complete your profile first. Your details are shown to voters next to your name.</p><Link className="btn" to="/profile">Complete profile</Link></div>
+        : !d.profileComplete ? <div className="panel space-y-3"><p>Complete your profile first. It is shown to voters next to your name.</p><Link className="btn" to="/profile">Complete profile</Link></div>
+        : d.standing ? <div className="panel text-soft">You have applied for a seat. Each person can stand for only one seat per election. If your application is rejected you can apply for another.</div>
+        : !available.length ? <div className="panel text-soft">There is no open seat you can apply for right now.</div>
         : (
           <form onSubmit={submit} className="panel space-y-4">
             <div className="flex items-center gap-3"><Avatar src={user.photoUrl} name={user.name} size={48} /><div><b className="text-white">{user.name}</b><p className="text-xs text-soft">{user.department}, ID {user.employeeId}</p></div></div>
+            <div><label className="label" htmlFor="pos">Seat you are standing for</label>
+              <select id="pos" className="input" required value={f.positionId} onChange={(e) => setF({ ...f, positionId: e.target.value })}><option value="">Choose a seat</option>{available.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}</select></div>
             <div><label className="label" htmlFor="m">Why should colleagues vote for you?</label><textarea id="m" className="input" rows={6} required minLength={20} maxLength={1500} value={f.manifesto} onChange={(e) => setF({ ...f, manifesto: e.target.value })} /></div>
-            <PhotoUpload value={f.photoUrl} name={user.name} label={user.photoUrl ? "Campaign photo (optional, defaults to your profile photo)" : "Candidate photo (required to appear on the ballot)"} onChange={(photoUrl) => setF({ ...f, photoUrl })} />
-            <Err msg={err} /><Btn busy={busy} disabled={!user.photoUrl && !f.photoUrl}>{busy ? 'Submitting...' : 'Submit application'}</Btn>
+            <PhotoUpload value={f.photoUrl} name={user.name} label={user.photoUrl ? 'Campaign photo (optional, defaults to your profile photo)' : 'Candidate photo (required to appear on the ballot)'} onChange={(photoUrl) => setF({ ...f, photoUrl })} />
+            <Err msg={err} /><Btn busy={busy} disabled={!f.photoUrl && !user.photoUrl}>{busy ? 'Submitting...' : 'Submit application'}</Btn>
           </form>
         )}
-      {d.open && user && !d.mine && err && null}
     </div>
   );
 }

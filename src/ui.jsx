@@ -45,7 +45,7 @@ export function PhotoUpload({ value, name, onChange, label = 'Photo' }) {
 // Registration -> Voting -> Results, with the real dates
 export function Phases({ e, status }) {
   const at = { upcoming: -1, registration: 0, waiting: 0.5, voting: 1, closed: 2 }[status];
-  const steps = [['Voter registration', `${fmt(e.regStart)} to ${fmt(e.regEnd)}`], ['Voting', `${fmt(e.voteStart)} to ${fmt(e.voteEnd)}`], ['Results published', fmt(e.voteEnd)]];
+  const steps = [['Voter registration', `${fmt(e.regStart)} to ${fmt(e.regEnd)}`], ['Voting, seat by seat', `${fmt(e.voteStart)} to ${fmt(e.voteEnd)}`], ['Results published', fmt(e.voteEnd)]];
   return (
     <ol className="grid gap-3 sm:grid-cols-3">
       {steps.map(([t, d], i) => {
