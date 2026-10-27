@@ -1,0 +1,9 @@
+@tailwind base; @tailwind components; @tailwind utilities;
+:root { color-scheme: dark; }
+@layer components {
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-sm font-extrabold text-night transition hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold disabled:cursor-not-allowed disabled:opacity-40; }
+  .btn-alt { @apply inline-flex items-center justify-center gap-2 rounded-lg border border-line px-4 py-2.5 text-sm font-bold text-white/90 transition hover:bg-raise focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold; }
+  .input { @apply w-full rounded-lg border border-line bg-night px-3 py-2.5 text-sm text-white placeholder:text-soft/60 focus:border-brand focus:outline focus:outline-1 focus:outline-brand; }
+  .panel { @apply rounded-xl border border-line bg-surface p-5; }
+  .label { @apply mb-1 block text-sm font-bold text-soft; }
+}
